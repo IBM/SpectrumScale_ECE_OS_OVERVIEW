@@ -5,7 +5,7 @@ import csv
 import os
 import sys
 
-MOR_OVERVIEW_VERSION = "1.1"
+MOR_OVERVIEW_VERSION = "1.2"
 
 # Colorful constants
 RED = '\033[91m'
@@ -267,7 +267,7 @@ def print_summary(arch_errors,
         fatal_errors = fatal_errors + 1
 
     if not NVME_not_available:
-        if NVME_number_of_drives > 3:
+        if NVME_number_of_drives > 5:
             print(
                 INFO +
                 " There are " +
@@ -297,7 +297,7 @@ def print_summary(arch_errors,
         fatal_errors = fatal_errors + 1
 
     if not SSD_not_available:
-        if SSD_number_of_drives > 3:
+        if SSD_number_of_drives > 5:
             print(INFO + " There are " +
                   str(SSD_number_of_drives) +
                   " SSD drive[s] that can be used by the ECE cluster")
@@ -324,7 +324,7 @@ def print_summary(arch_errors,
         fatal_errors = fatal_errors + 1
 
     if not HDD_not_available:
-        if HDD_number_of_drives > 3:
+        if HDD_number_of_drives > 5:
             print(
                 INFO +
                 " There are " +
