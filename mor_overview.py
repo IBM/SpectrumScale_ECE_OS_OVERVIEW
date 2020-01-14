@@ -4,8 +4,9 @@ import argparse
 import csv
 import os
 import sys
+import ast
 
-MOR_OVERVIEW_VERSION = "1.2"
+MOR_OVERVIEW_VERSION = "1.3"
 
 # Colorful constants
 RED = '\033[91m'
@@ -87,7 +88,7 @@ def load_json_files_into_ditionary(json_files_path, json_files_list):
     try:
         for json_file in json_files_list:
             json_file_name = open(json_files_path + json_file, 'r')
-            all_json_dict[json_file] = json.load(json_file_name)
+            all_json_dict[json_file] = ast.literal_eval(json.load(json_file_name))
         return all_json_dict
     except BaseException:
         sys.exit(
@@ -131,8 +132,12 @@ def check_same_values_on_nodes(
     errors = 0
     list = []
     for node_file in json_files_list:
-        item = all_json_dict[node_file][dict_json_index]
-        list.append(item)
+        try:
+            item = all_json_dict[node_file][dict_json_index]
+            list.append(item)
+        except KeyError:
+            # No key on JSON lets not fail here
+            list.append(False)
     values_list = unique_list(list)
     if len(values_list) != 1:
         errors = errors + 1
@@ -341,7 +346,7 @@ def print_summary(arch_errors,
         print(INFO + " There are no HDD drives that can be used by ECE")
 
     # Do we have 12 drives or more from any type of drive?
-    if NVME_number_of_drives or SSD_number_of_drives or HDD_num_errors > 11:
+    if any(x > 11 for x in (NVME_number_of_drives,SSD_number_of_drives,HDD_num_errors)):
         print(
             INFO +
             " There are 12 or more drives of one technology" +
@@ -481,7 +486,10 @@ def main():
             'NVME_number_of_drives')
         # Lets check we have at least 6 NVMe drives, we passed
         # check_same_values_on_nodes so we can just query any node
-        NVME_not_available = all_json_dict.values()[0]['NVME_fatal_error']
+        try:
+            NVME_not_available = list(all_json_dict.values())[0]['NVME_fatal_error']
+        except KeyError:
+            NVME_not_available = True
         NVME_number_of_drives = 0
         if not NVME_not_available:
             NVME_number_of_drives = sum_values_on_nodes(
@@ -501,9 +509,13 @@ def main():
             'SSD_n_of_drives')
         # Lets check we have at least 6 SSD drives
         # we passed check_same_values_on_nodes so we can just query any node
-        SSD_not_available = all_json_dict.values()[0]['SSD_fatal_error']
+        try:
+            SSD_not_available = list(all_json_dict.values())[0]['SSD_fatal_error']
+        except KeyError:
+            SSD_not_available = True
         SSD_number_of_drives = 0
         if not SSD_not_available:
+        #if not SSD_fatal_errors:
             SSD_number_of_drives = sum_values_on_nodes(
                 json_files_list,
                 all_json_dict,
@@ -521,9 +533,13 @@ def main():
             'HDD_n_of_drives')
         # Lets check we have at least 6 HDD drives
         # we passed check_same_values_on_nodes so we can just query any node
-        HDD_not_available = all_json_dict.values()[0]['HDD_fatal_error']
+        try:
+            HDD_not_available = list(all_json_dict.values())[0]['HDD_fatal_error']
+        except KeyError:
+            HDD_not_available = True
         HDD_number_of_drives = 0
         if not HDD_not_available:
+        #if not HDD_fatal_errors:
             HDD_number_of_drives = sum_values_on_nodes(
                 json_files_list,
                 all_json_dict,
