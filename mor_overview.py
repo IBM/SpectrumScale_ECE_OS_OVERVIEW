@@ -6,7 +6,7 @@ import os
 import sys
 import ast
 
-MOR_OVERVIEW_VERSION = "1.3"
+MOR_OVERVIEW_VERSION = "1.5"
 
 # Colorful constants
 RED = '\033[91m'
@@ -125,20 +125,47 @@ def review_individual_checks(json_files_list, all_json_dict):
     return errors
 
 
+def check_different_wwn_on_nodes(
+        json_files_list,
+        all_json_dict,
+        dict_json_index):
+
+    errors = 0
+    tmp_list = []
+    for node_file in json_files_list:
+        try:
+            for drive in all_json_dict[node_file][dict_json_index].keys():
+                type(tmp_list)
+                item = all_json_dict[node_file][dict_json_index][drive][4]
+                if item in tmp_list:
+                    errors = errors +1
+                else:
+                    tmp_list.append(item)
+        except KeyError:
+            # No key on JSON lets not fail here
+            tmp_list.append(False)
+    if errors > 0:
+        # we have duplicates
+        duplicates_error = True
+    else:
+        duplicates_error = False
+    return duplicates_error
+
+
 def check_same_values_on_nodes(
         json_files_list,
         all_json_dict,
         dict_json_index):
     errors = 0
-    list = []
+    tmp_list = []
     for node_file in json_files_list:
         try:
             item = all_json_dict[node_file][dict_json_index]
-            list.append(item)
+            tmp_list.append(item)
         except KeyError:
             # No key on JSON lets not fail here
-            list.append(False)
-    values_list = unique_list(list)
+            tmp_list.append(False)
+    values_list = unique_list(tmp_list)
     if len(values_list) != 1:
         errors = errors + 1
     return errors
@@ -165,29 +192,33 @@ def check_system_loose_memory(json_files_list, all_json_dict, dict_json_index):
     return system_loose_memory_error
 
 
-def print_summary(arch_errors,
-                  socket_errors,
-                  core_errors,
-                  dimm_all_slots_error,
-                  dimm_empty_slots_error,
-                  system_memory_error,
-                  system_loose_memory_error,
-                  NIC_errors,
-                  link_errors,
-                  SAS_errors,
-                  NVME_fatal_errors,
-                  NVME_num_errors,
-                  NVME_not_available,
-                  NVME_number_of_drives,
-                  SSD_fatal_errors,
-                  SSD_num_errors,
-                  SSD_not_available,
-                  SSD_number_of_drives,
-                  HDD_fatal_errors,
-                  HDD_num_errors,
-                  HDD_not_available,
-                  HDD_number_of_drives,
-                  ALL_number_of_drives):
+def print_summary(
+            arch_errors,
+            socket_errors,
+            core_errors,
+            dimm_all_slots_error,
+            dimm_empty_slots_error,
+            system_memory_error,
+            system_loose_memory_error,
+            NIC_errors,
+            link_errors,
+            SAS_errors,
+            NVME_fatal_errors,
+            NVME_num_errors,
+            NVME_not_available,
+            NVME_number_of_drives,
+            SSD_fatal_errors,
+            SSD_num_errors,
+            SSD_not_available,
+            SSD_number_of_drives,
+            SSD_wwn_duplicated,
+            HDD_fatal_errors,
+            HDD_num_errors,
+            HDD_not_available,
+            HDD_number_of_drives,
+            HDD_wwn_duplicated,
+            ALL_number_of_drives
+            ):
 
     fatal_errors = 0
 
@@ -311,6 +342,11 @@ def print_summary(arch_errors,
                   + str(SSD_number_of_drives) +
                   " SSD drive[s] that can be used by the ECE cluster")
             fatal_errors = fatal_errors + 1
+        if SSD_wwn_duplicated:
+            print(ERROR + " There are duplicated WWN on the SSD drives")
+            fatal_errors = fatal_errors + 1
+        else:
+            print(INFO + " There are no duplicated WWN on the SSD drives")
     else:
         print(INFO + " There are no SSD drives that can be used by ECE")
 
@@ -342,11 +378,16 @@ def print_summary(arch_errors,
                 str(HDD_number_of_drives) +
                 " HDD drive[s] that can be used by the ECE cluster")
             fatal_errors = fatal_errors + 1
+        if HDD_wwn_duplicated:
+            print(ERROR + " There are duplicated WWN on the HDD drives")
+            fatal_errors = fatal_errors + 1
+        else:
+            print(INFO + " There are no duplicated WWN on the HDD drives")
     else:
         print(INFO + " There are no HDD drives that can be used by ECE")
 
     # Do we have 12 drives or more from any type of drive?
-    if any(x > 11 for x in (NVME_number_of_drives,SSD_number_of_drives,HDD_num_errors)):
+    if any(x > 11 for x in (NVME_number_of_drives,SSD_number_of_drives,HDD_number_of_drives)):
         print(
             INFO +
             " There are 12 or more drives of one technology" +
@@ -514,12 +555,17 @@ def main():
         except KeyError:
             SSD_not_available = True
         SSD_number_of_drives = 0
+        SSD_wwn_duplicated = False
         if not SSD_not_available:
         #if not SSD_fatal_errors:
             SSD_number_of_drives = sum_values_on_nodes(
                 json_files_list,
                 all_json_dict,
                 'SSD_n_of_drives')
+            SSD_wwn_duplicated = check_different_wwn_on_nodes(
+                json_files_list,
+                all_json_dict,
+                'SSD_drives')
         # Check all nodes have same HDD_fatal_error status
         HDD_fatal_errors = check_same_values_on_nodes(
             json_files_list,
@@ -538,12 +584,17 @@ def main():
         except KeyError:
             HDD_not_available = True
         HDD_number_of_drives = 0
+        HDD_wwn_duplicated = False
         if not HDD_not_available:
         #if not HDD_fatal_errors:
             HDD_number_of_drives = sum_values_on_nodes(
                 json_files_list,
                 all_json_dict,
                 'HDD_n_of_drives')
+            HDD_wwn_duplicated = check_different_wwn_on_nodes(
+                json_files_list,
+                all_json_dict,
+                'HDD_drives')
         # Could leverage sum of the amounts calculated here
         # but lets use the JSON input instead
         ALL_number_of_drives = sum_values_on_nodes(
@@ -573,11 +624,14 @@ def main():
             SSD_num_errors,
             SSD_not_available,
             SSD_number_of_drives,
+            SSD_wwn_duplicated,
             HDD_fatal_errors,
             HDD_num_errors,
             HDD_not_available,
             HDD_number_of_drives,
-            ALL_number_of_drives)
+            HDD_wwn_duplicated,
+            ALL_number_of_drives
+            )
     else:
         print(
             WARNING +
