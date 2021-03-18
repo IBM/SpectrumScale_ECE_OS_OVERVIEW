@@ -6,7 +6,7 @@ import os
 import sys
 import ast
 
-MOR_OVERVIEW_VERSION = "1.5"
+MOR_OVERVIEW_VERSION = "1.6"
 
 # Colorful constants
 RED = '\033[91m'
@@ -125,6 +125,30 @@ def review_individual_checks(json_files_list, all_json_dict):
     return errors
 
 
+def check_different_serial_on_nodes(
+        json_files_list,
+        all_json_dict):
+    
+    errors = 0
+    tmp_list = []
+    for node_file in json_files_list:
+        try:
+            item = all_json_dict[node_file]["system_serial"]
+            if item in tmp_list:
+                errors = errors +1
+            else:
+                tmp_list.append(item)
+        except KeyError:
+            # No key on JSON lets not fail here
+            tmp_list.append(False)
+        if errors > 0:
+            # we have duplicates
+            duplicates_error = True
+        else:
+            duplicates_error = False
+    return duplicates_error
+
+
 def check_different_wwn_on_nodes(
         json_files_list,
         all_json_dict,
@@ -135,7 +159,6 @@ def check_different_wwn_on_nodes(
     for node_file in json_files_list:
         try:
             for drive in all_json_dict[node_file][dict_json_index].keys():
-                type(tmp_list)
                 item = all_json_dict[node_file][dict_json_index][drive][4]
                 if item in tmp_list:
                     errors = errors +1
@@ -217,7 +240,8 @@ def print_summary(
             HDD_not_available,
             HDD_number_of_drives,
             HDD_wwn_duplicated,
-            ALL_number_of_drives
+            ALL_number_of_drives,
+            node_duplicated_serial
             ):
 
     fatal_errors = 0
@@ -416,6 +440,17 @@ def print_summary(
             "the maximum number of drives per Recovery Group is 512. " +
             "You must use more than one Recovery Group")
 
+    if node_duplicated_serial:
+        print(
+            ERROR +
+            " Not all nodes have unique serial numbers")
+        fatal_errors = fatal_errors + 1
+    else:
+        print(
+            INFO +
+            " All nodes have unique serial numbers")
+        
+
     if fatal_errors > 0:
         sys.exit(
             ERROR +
@@ -601,6 +636,12 @@ def main():
             json_files_list,
             all_json_dict,
             'ALL_number_of_drives')
+
+        # Check unique serial numbers
+        node_duplicated_serial = check_different_serial_on_nodes(
+            json_files_list,
+            all_json_dict
+        )
         # We are done with checks
         print(INFO + " Completed overall ECE checks")
 
@@ -630,7 +671,8 @@ def main():
             HDD_not_available,
             HDD_number_of_drives,
             HDD_wwn_duplicated,
-            ALL_number_of_drives
+            ALL_number_of_drives,
+            node_duplicated_serial
             )
     else:
         print(
