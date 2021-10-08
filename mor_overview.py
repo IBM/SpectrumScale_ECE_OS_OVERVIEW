@@ -5,8 +5,9 @@ import csv
 import os
 import sys
 import ast
+import platform
 
-MOR_OVERVIEW_VERSION = "1.6"
+MOR_OVERVIEW_VERSION = "1.8"
 
 # Colorful constants
 RED = '\033[91m'
@@ -128,7 +129,8 @@ def review_individual_checks(json_files_list, all_json_dict):
 def check_different_serial_on_nodes(
         json_files_list,
         all_json_dict):
-    
+    if platform.processor() == 's390x':  # No serial# checking on s390x
+        return 0
     errors = 0
     tmp_list = []
     for node_file in json_files_list:
@@ -174,6 +176,41 @@ def check_different_wwn_on_nodes(
         duplicates_error = False
     return duplicates_error
 
+def check_different_nvme_id_on_nodes(
+        json_files_list,
+        all_json_dict,
+        dict_json_index):
+    errors = 0
+    eui_list = []
+    nguid_list = []
+    eui_zero = '0000000000000000'
+    nguid_zero = '00000000000000000000000000000000'
+    for node_file in json_files_list:
+        try:
+            for drive in all_json_dict[node_file][dict_json_index].keys():
+                eui = all_json_dict[node_file][dict_json_index][drive][0]
+                nguid = all_json_dict[node_file][dict_json_index][drive][1]
+
+                if str(eui) != eui_zero and str(eui) in eui_list:
+                    errors = errors +1
+                else:
+                    eui_list.append(str(eui))
+
+                if str(nguid) != nguid_zero and str(nguid) in nguid_list:
+                    errors = errors +1
+                else:
+                    nguid_list.append(str(nguid))
+        except KeyError:
+            # No key on JSON lets not fail here
+            eui_list.append(False)
+            nguid_list.append(False)
+
+    if errors > 0:
+        # we have duplicates
+        duplicates_error = True
+    else:
+        duplicates_error = False
+    return duplicates_error
 
 def check_same_values_on_nodes(
         json_files_list,
@@ -230,6 +267,7 @@ def print_summary(
             NVME_num_errors,
             NVME_not_available,
             NVME_number_of_drives,
+            NVME_duplicate_id_error,
             SSD_fatal_errors,
             SSD_num_errors,
             SSD_not_available,
@@ -255,27 +293,36 @@ def print_summary(
             "processor architecture")
         fatal_errors = fatal_errors + 1
 
-    if socket_errors == 0:
-        print(INFO + " All ECE nodes have the same number of sockets")
-    else:
-        print(ERROR + " Not all ECE nodes have the same number of sockets")
-        fatal_errors = fatal_errors + 1
+    if platform.processor() != 's390x':  # No sockets on s390x
+        if socket_errors == 0:
+            print(INFO + " All ECE nodes have the same number of sockets")
+        else:
+            print(ERROR + " Not all ECE nodes have the same number of sockets")
+            fatal_errors = fatal_errors + 1
 
     if core_errors == 0:
-        print(INFO + " All ECE nodes have the same number of cores per socket")
+        if platform.processor() == 's390x':  # No sockets on s390x
+            print(INFO + " All ECE nodes have the same number of cores")
+        else:
+            print(INFO + " All ECE nodes have the same number of cores per socket")
     else:
-        print(ERROR + " Not all ECE nodes have the same " +
-              "number of cores per socket")
+        if platform.processor() == 's390x':  # No sockets on s390x
+            print(ERROR + " Not all ECE nodes have the same " +
+                  "number of cores")
+        else:
+            print(ERROR + " Not all ECE nodes have the same " +
+                  "number of cores per socket")
         fatal_errors = fatal_errors + 1
 
-    if dimm_all_slots_error == 0 and dimm_empty_slots_error == 0:
-        print(INFO + " All ECE nodes have the same number " +
-              "DIMM slots and modules")
-    else:
-        print(
-            WARNING +
-            " Not all ECE nodes have the same number " +
-            " DIMM slots and modules")
+    if platform.processor() != 's390x':  # No dimms on s390x
+        if dimm_all_slots_error == 0 and dimm_empty_slots_error == 0:
+            print(INFO + " All ECE nodes have the same number " +
+                  "DIMM slots and modules")
+        else:
+            print(
+                WARNING +
+                " Not all ECE nodes have the same number " +
+                " DIMM slots and modules")
 
     if system_memory_error == 0:
         print(INFO + " All ECE nodes have the same system memory")
@@ -302,11 +349,12 @@ def print_summary(
         print(ERROR + " Not all ECE nodes have the same network link speed")
         fatal_errors = fatal_errors + 1
 
-    if SAS_errors == 0:
-        print(INFO + " All ECE nodes have the same SAS model")
-    else:
-        print(ERROR + " Not all ECE nodes have the same SAS model")
-        fatal_errors = fatal_errors + 1
+    if platform.processor() != 's390x':  # No SAS drives on s390x
+        if SAS_errors == 0:
+            print(INFO + " All ECE nodes have the same SAS model")
+        else:
+            print(ERROR + " Not all ECE nodes have the same SAS model")
+            fatal_errors = fatal_errors + 1
 
     if NVME_fatal_errors == 0:
         print(
@@ -342,73 +390,81 @@ def print_summary(
     else:
         print(INFO + " There are no NVMe drives that can be used by ECE")
 
-    if SSD_fatal_errors == 0:
-        print(INFO + " All ECE nodes have SSD drives or " +
-              "all ECE nodes have no SSD drives")
-    else:
-        print(ERROR + " Some ECE nodes have SSD drives and " +
-              "other ECE nodes do not have SSD drives")
+    if NVME_duplicate_id_error:
+        print(ERROR + " Some ECE nodes have NVMe drives that have identical euids/nguids.")
         fatal_errors = fatal_errors + 1
-
-    if SSD_num_errors == 0:
-        print(INFO + " All ECE nodes have the same number of SSD drives")
     else:
-        print(ERROR + " Not all ECE nodes have the same number of SSD drives")
-        fatal_errors = fatal_errors + 1
+        print(INFO + " All ECE nodes have NVMe drives that have unique euids/nguids.")
 
-    if not SSD_not_available:
-        if SSD_number_of_drives > 5:
-            print(INFO + " There are " +
-                  str(SSD_number_of_drives) +
-                  " SSD drive[s] that can be used by the ECE cluster")
+    if platform.processor() != 's390x':  # No SSDs on s390x
+        if SSD_fatal_errors == 0:
+            print(INFO + " All ECE nodes have SSD drives or " +
+                  "all ECE nodes have no SSD drives")
         else:
-            print(ERROR + " There are "
-                  + str(SSD_number_of_drives) +
-                  " SSD drive[s] that can be used by the ECE cluster")
+            print(ERROR + " Some ECE nodes have SSD drives and " +
+                  "other ECE nodes do not have SSD drives")
             fatal_errors = fatal_errors + 1
-        if SSD_wwn_duplicated:
-            print(ERROR + " There are duplicated WWN on the SSD drives")
-            fatal_errors = fatal_errors + 1
+   
+        if SSD_num_errors == 0:
+            print(INFO + " All ECE nodes have the same number of SSD drives")
         else:
-            print(INFO + " There are no duplicated WWN on the SSD drives")
-    else:
-        print(INFO + " There are no SSD drives that can be used by ECE")
-
-    if HDD_fatal_errors == 0:
-        print(INFO + " All ECE nodes have HDD drives or " +
-              "all ECE nodes have no HDD drives")
-    else:
-        print(ERROR + " Some ECE nodes have HDD drives and " +
-              "other ECE nodes do not have HDD drives")
-        fatal_errors = fatal_errors + 1
-
-    if HDD_num_errors == 0:
-        print(INFO + " All ECE nodes have the same number of HDD drives")
-    else:
-        print(ERROR + " Not all ECE nodes have the same number of HDD drives")
-        fatal_errors = fatal_errors + 1
-
-    if not HDD_not_available:
-        if HDD_number_of_drives > 5:
-            print(
-                INFO +
-                " There are " +
-                str(HDD_number_of_drives) +
-                " HDD drive[s] that can be used by the ECE cluster")
-        else:
-            print(
-                ERROR +
-                " There are " +
-                str(HDD_number_of_drives) +
-                " HDD drive[s] that can be used by the ECE cluster")
+            print(ERROR + " Not all ECE nodes have the same number of SSD drives")
             fatal_errors = fatal_errors + 1
-        if HDD_wwn_duplicated:
-            print(ERROR + " There are duplicated WWN on the HDD drives")
-            fatal_errors = fatal_errors + 1
+
+        if not SSD_not_available:
+            if SSD_number_of_drives > 5:
+                print(INFO + " There are " +
+                      str(SSD_number_of_drives) +
+                      " SSD drive[s] that can be used by the ECE cluster")
+            else:
+                print(ERROR + " There are "
+                      + str(SSD_number_of_drives) +
+                      " SSD drive[s] that can be used by the ECE cluster")
+                fatal_errors = fatal_errors + 1
+            if SSD_wwn_duplicated:
+                print(ERROR + " There are duplicated WWN on the SSD drives")
+                fatal_errors = fatal_errors + 1
+            else:
+                print(INFO + " There are no duplicated WWN on the SSD drives")
         else:
-            print(INFO + " There are no duplicated WWN on the HDD drives")
-    else:
-        print(INFO + " There are no HDD drives that can be used by ECE")
+            print(INFO + " There are no SSD drives that can be used by ECE")
+
+    if platform.processor() != 's390x':  # No HDD on s390x
+        if HDD_fatal_errors == 0:
+            print(INFO + " All ECE nodes have HDD drives or " +
+                  "all ECE nodes have no HDD drives")
+        else:
+            print(ERROR + " Some ECE nodes have HDD drives and " +
+                  "other ECE nodes do not have HDD drives")
+            fatal_errors = fatal_errors + 1
+
+        if HDD_num_errors == 0:
+            print(INFO + " All ECE nodes have the same number of HDD drives")
+        else:
+            print(ERROR + " Not all ECE nodes have the same number of HDD drives")
+            fatal_errors = fatal_errors + 1
+
+        if not HDD_not_available:
+            if HDD_number_of_drives > 5:
+                print(
+                    INFO +
+                    " There are " +
+                    str(HDD_number_of_drives) +
+                    " HDD drive[s] that can be used by the ECE cluster")
+            else:
+                print(
+                    ERROR +
+                    " There are " +
+                    str(HDD_number_of_drives) +
+                    " HDD drive[s] that can be used by the ECE cluster")
+                fatal_errors = fatal_errors + 1
+            if HDD_wwn_duplicated:
+                print(ERROR + " There are duplicated WWN on the HDD drives")
+                fatal_errors = fatal_errors + 1
+            else:
+                print(INFO + " There are no duplicated WWN on the HDD drives")
+        else:
+            print(INFO + " There are no HDD drives that can be used by ECE")
 
     # Do we have 12 drives or more from any type of drive?
     if any(x > 11 for x in (NVME_number_of_drives,SSD_number_of_drives,HDD_number_of_drives)):
@@ -439,16 +495,16 @@ def print_summary(
             " drive[s] that can be used by the ECE cluster, " +
             "the maximum number of drives per Recovery Group is 512. " +
             "You must use more than one Recovery Group")
-
-    if node_duplicated_serial:
-        print(
-            ERROR +
-            " Not all nodes have unique serial numbers")
-        fatal_errors = fatal_errors + 1
-    else:
-        print(
-            INFO +
-            " All nodes have unique serial numbers")
+    if platform.processor() != 's390x':  # No serial# checking on s390x
+        if node_duplicated_serial:
+            print(
+                ERROR +
+                " Not all nodes have unique serial numbers")
+            fatal_errors = fatal_errors + 1
+        else:
+            print(
+                INFO +
+                " All nodes have unique serial numbers")
         
 
     if fatal_errors > 0:
@@ -458,7 +514,6 @@ def print_summary(
             "check output and mitigate those issues before trying again")
     else:
         print(INFO + " All ECE checks passed, installation can continue")
-
 
 def main():
     json_files_csv_str, json_files_path, do_checks = parse_arguments()
@@ -572,6 +627,13 @@ def main():
                 json_files_list,
                 all_json_dict,
                 'NVME_number_of_drives')
+
+        #Check to see if any Nvmes have identical euids or nguids
+        NVME_duplicate_id_error = check_different_nvme_id_on_nodes(
+            json_files_list,
+            all_json_dict,
+            'NVME_ID')
+
         # Check all nodes have same SSD_fatal_error status
         SSD_fatal_errors = check_same_values_on_nodes(
             json_files_list,
@@ -661,6 +723,7 @@ def main():
             NVME_num_errors,
             NVME_not_available,
             NVME_number_of_drives,
+            NVME_duplicate_id_error,
             SSD_fatal_errors,
             SSD_num_errors,
             SSD_not_available,
